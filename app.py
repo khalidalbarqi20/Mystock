@@ -7,12 +7,33 @@ from plotly.subplots import make_subplots
 from fpdf import FPDF
 from datetime import timedelta
 
-st.set_page_config(page_title="المحلل الفني الذكي", layout="wide")
+# 1. إعدادات الصفحة العامة (التنسيق الاحترافي)
+st.set_page_config(page_title="منصة المحلل الذكي", layout="wide")
 
-# خانة البحث
-query = st.text_input("أدخل الرمز (مثال: 1120 أو AAPL أو GOLD):", value="1120").strip()
+# إخفاء قائمة Streamlit وتنسيق العنوان
+st.markdown("""
+    <style>
+    .main-title {
+        font-size: 70px !important;
+        font-weight: bold;
+        color: #00FFCC;
+        text-align: center;
+        margin-top: -50px;
+        text-shadow: 2px 2px 10px #000;
+    }
+    .stMetric {
+        background-color: #1e2130;
+        padding: 15px;
+        border-radius: 10px;
+        border: 1px solid #333;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
-# تحويل الرمز
+# 2. خانة البحث في الأعلى
+query = st.text_input("🔍 أدخل رمز السهم أو الرقم (مثال: 1120 أو AAPL):", value="1120").strip()
+
+# تحويل الرمز ذكياً
 if query.lower() == 'gold': symbol = "GC=F"
 elif query.isdigit(): symbol = query + ".SR"
 else: symbol = query.upper()
@@ -23,65 +44,83 @@ if symbol:
         if not df.empty:
             if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
 
-            # اسم السهم فوق التشارت مباشرة بخط عريض جداً
-            st.markdown(f"<div style='text-align: center;'><h1 style='font-size: 60px; color: #00FFCC;'>{symbol}</h1></div>", unsafe_allow_html=True)
+            # --- أ: إظهار اسم السهم أول شيء فوق ---
+            st.markdown(f'<p class="main-title">{symbol}</p>', unsafe_allow_html=True)
 
             # حساب المؤشرات
             df['RSI'] = ta.rsi(df['Close'], length=14)
-            df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
             last_price = float(df['Close'].iloc[-1])
-            atr_val = float(df['ATR'].iloc[-1])
-
-            # معادلة التوقع لليومين القادمين
-            # إذا كان الزخم صاعد نضيف قيمة ATR، وإذا هابط نطرحها
+            
+            # حساب التوقع (هدف اليومين القادمين)
             change = df['Close'].diff().tail(5).mean()
-            expected_price = last_price + (change * 2) 
+            expected_price = last_price + (change * 2)
             target_date = df.index[-1] + timedelta(days=2)
 
-            # الرسم البياني
-            fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.6, 0.2, 0.2])
+            # --- ب: تنسيق المعلومات السريعة (Metrics) ---
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("السعر الحالي", f"{last_price:.2f}")
+            m2.metric("مؤشر RSI", f"{df['RSI'].iloc[-1]:.2f}")
+            m3.metric("الهدف المتوقع", f"{expected_price:.2f}")
+            m4.metric("التاريخ المستهدف", target_date.strftime('%Y-%m-%d'))
 
-            # 1. الشموع
-            fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="السعر"), row=1, col=1)
+            st.write("---")
+
+            # --- ج: التشارت الرئيسي (الشموع والمؤشرات) ---
+            st.subheader("📊 التحليل الفني والشموع اليابانية")
+            fig1 = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.7, 0.3])
             
-            # 2. إضافة نقطة الهدف المتوقع على التشارت
-            fig.add_trace(go.Scatter(x=[target_date], y=[expected_price], mode='markers+text', 
-                                     text=[f"الهدف: {expected_price:.2f}"], textposition="top center",
-                                     marker=dict(color='cyan', size=15, symbol='star'), name="الهدف المتوقع"), row=1, col=1)
+            # الشموع
+            fig1.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="السعر"), row=1, col=1)
+            # RSI
+            fig1.add_trace(go.Scatter(x=df.index, y=df['RSI'], name="RSI", line=dict(color='purple')), row=2, col=1)
+            fig1.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
+            fig1.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
+            
+            fig1.update_layout(height=600, template="plotly_dark", xaxis_rangeslider_visible=False, margin=dict(t=0, b=0))
+            st.plotly_chart(fig1, use_container_width=True)
 
-            # 3. خطوط الدعم والمقاومة والترند
-            res = float(df['High'].tail(20).max())
-            sup = float(df['Low'].tail(20).min())
-            fig.add_hline(y=res, line_dash="dash", line_color="red", row=1, col=1)
-            fig.add_hline(y=sup, line_dash="dash", line_color="green", row=1, col=1)
+            st.write("---")
 
-            # RSI & MACD
-            fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], name="RSI", line=dict(color='purple')), row=2, col=1)
-            macd = ta.macd(df['Close'])
-            fig.add_trace(go.Bar(x=df.index, y=macd.iloc[:, -1], name="MACD Hist"), row=3, col=1)
+            # --- د: تشارت التوقعات المنفصل (خاص بالهدف القادم) ---
+            st.subheader("🔮 خوارزمية التوقع (اليومين القادمين)")
+            
+            # تجهيز بيانات التشارت التوقعي (آخر 10 أيام + يومين مستقبليين)
+            recent_df = df.tail(10)
+            fig2 = go.Figure()
+            
+            # رسم المسار الأخير
+            fig2.add_trace(go.Scatter(x=recent_df.index, y=recent_df['Close'], mode='lines+markers', name="المسار الأخير", line=dict(color='white', dash='dot')))
+            
+            # رسم الهدف المتوقع (النجمة)
+            fig2.add_trace(go.Scatter(x=[target_date], y=[expected_price], mode='markers+text',
+                                     text=[f"الهدف المتوقع ({expected_price:.2f})"], textposition="top center",
+                                     marker=dict(color='#00FFCC', size=20, symbol='star', line=dict(width=2, color="white")),
+                                     name="الهدف الذكي"))
 
-            fig.update_layout(height=850, template="plotly_dark", xaxis_rangeslider_visible=False)
-            st.plotly_chart(fig, use_container_width=True)
+            fig2.update_layout(height=400, template="plotly_dark", 
+                              xaxis_title="التاريخ المستهدف", 
+                              yaxis_title="السعر المتوقع",
+                              xaxis=dict(showgrid=False), yaxis=dict(showgrid=True))
+            
+            st.plotly_chart(fig2, use_container_width=True)
 
-            # عرض التوقعات بالأرقام
-            st.success(f"🎯 الهدف المتوقع خلال يومين العمل القادمين: {expected_price:.2f}")
-            st.info(f"💡 تعتمد هذه القيمة على متوسط الحركة السعرية الأخيرة (Momentum) وقوة التذبذب.")
-
-            # تصدير PDF
-            def create_pdf():
+            # --- هـ: زر تحميل PDF المطور ---
+            def generate_pdf():
                 pdf = FPDF()
                 pdf.add_page()
                 pdf.set_font("Arial", 'B', 16)
-                pdf.cell(190, 10, f"Technical Report: {symbol}", ln=True, align='C')
+                pdf.cell(190, 10, f"TECHNICAL REPORT: {symbol}", ln=True, align='C')
                 pdf.ln(10)
                 pdf.set_font("Arial", '', 12)
-                pdf.cell(100, 10, f"Current Price: {last_price:.2f}")
-                pdf.cell(100, 10, f"Expected Target (2 Days): {expected_price:.2f}", ln=True)
-                pdf.cell(100, 10, f"Support: {sup:.2f}")
-                pdf.cell(100, 10, f"Resistance: {res:.2f}", ln=True)
+                pdf.cell(100, 10, f"Analysis Date: {df.index[-1].strftime('%Y-%m-%d')}")
+                pdf.cell(100, 10, f"Last Price: {last_price:.2f}", ln=True)
+                pdf.cell(100, 10, f"Target Price: {expected_price:.2f}")
+                pdf.cell(100, 10, f"Target Date: {target_date.strftime('%Y-%m-%d')}", ln=True)
+                pdf.ln(10)
+                pdf.multi_cell(0, 10, f"Summary: Based on momentum, the expected direction for {symbol} in the next 48h is toward {expected_price:.2f}.")
                 return pdf.output(dest='S').encode('latin-1')
 
-            st.download_button("📥 تحميل التقرير الشامل PDF", data=create_pdf(), file_name=f"{symbol}_Final_Report.pdf")
+            st.download_button("📥 تصدير التقرير الفني الشامل (PDF)", data=generate_pdf(), file_name=f"{symbol}_Report.pdf")
 
     except Exception as e:
-        st.error(f"حدث خطأ: تأكد من الرمز. {e}")
+        st.error(f"خطأ في البيانات: {e}")
