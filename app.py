@@ -6,111 +6,130 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import timedelta
 
-# 1. إعدادات الصفحة للعرض المكتبي الواسع
-st.set_page_config(page_title="محلل الأسهم الاحترافي", layout="wide")
+# 1. إعدادات الصفحة الفائقة للكمبيوتر
+st.set_page_config(page_title="المحلل الفني الاحترافي V4", layout="wide")
 
+# تنسيق CSS احترافي لمنع التداخل وتجميل المظهر
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap');
     * { font-family: 'Cairo', sans-serif; direction: rtl; }
-    .report-title { background: #00FFCC; color: black; padding: 10px; border-radius: 10px; text-align: center; font-size: 30px; font-weight: bold; }
-    .status-box { background: #1e2130; padding: 20px; border-radius: 15px; border: 1px solid #444; text-align: center; }
+    .main-header {
+        background: linear-gradient(90deg, #1e2130, #0e1117);
+        padding: 30px;
+        border-radius: 20px;
+        border: 2px solid #00FFCC;
+        text-align: center;
+        margin-bottom: 40px;
+    }
+    .symbol-label { font-size: 75px !important; color: #00FFCC; font-weight: bold; margin: 0; }
+    .gauge-card { background: #161a25; padding: 20px; border-radius: 20px; border: 1px solid #333; }
     </style>
     """, unsafe_allow_html=True)
 
-# 2. البحث
-query = st.text_input("🔍 أدخل رمز السهم (مثال: 1120 أو 8180):", value="8180").strip()
+# 2. نظام البحث الذكي
+query = st.text_input("🔍 أدخل الرمز (مثال: 1120 أو 8180 أو AAPL):", value="1120").strip()
 
 if query:
-    if query.isdigit(): symbol = query + ".SR"
-    else: symbol = query.upper()
+    if query.isdigit(): 
+        symbol = query + ".SR"
+    else: 
+        symbol = query.upper()
 
     try:
-        # جلب البيانات (يومي وأسبوعي)
-        df_daily = yf.download(symbol, period="1y", interval="1d")
+        # جلب البيانات (فريم ساعة لضمان دقة المؤشرات لآخر أسبوعين)
+        data = yf.download(symbol, period="1mo", interval="1h")
         
-        if not df_daily.empty:
-            if isinstance(df_daily.columns, pd.MultiIndex): df_daily.columns = df_daily.columns.get_level_values(0)
+        if data.empty:
+            st.error("❌ لم يتم العثور على بيانات لهذا الرمز. تأكد من الرقم.")
+        else:
+            # تنظيف البيانات من الـ Multi-index لتجنب الـ TypeError
+            if isinstance(data.columns, pd.MultiIndex):
+                data.columns = data.columns.get_level_values(0)
             
-            # حساب المؤشرات
-            df_daily['SMA50'] = ta.sma(df_daily['Close'], length=50)
-            df_daily['SMA200'] = ta.sma(df_daily['Close'], length=200)
-            df_daily['RSI'] = ta.rsi(df_daily['Close'], length=14)
-            macd = ta.macd(df_daily['Close'])
-            
-            last_close = float(df_daily['Close'].iloc[-1])
-            rsi_val = float(df_daily['RSI'].iloc[-1])
-            
-            # حساب الإيجابية (خوارزمية العداد)
+            df = data.copy()
+
+            # حساب المؤشرات الفنية (جميعها مفعلة)
+            df['SMA50'] = ta.sma(df['Close'], length=50)
+            df['SMA200'] = ta.sma(df['Close'], length=200)
+            df['RSI'] = ta.rsi(df['Close'], length=14)
+            macd_data = ta.macd(df['Close'])
+            df = pd.concat([df, macd_data], axis=1)
+
+            # استخراج القيم الأخيرة للتحليل
+            last_p = float(df['Close'].iloc[-1])
+            rsi_val = float(df['RSI'].iloc[-1])
+            macd_val = float(df.iloc[-1, -3]) # MACD Line
+            sig_val = float(df.iloc[-1, -2])  # Signal Line
+            res_p = float(df['High'].max())
+            sup_p = float(df['Low'].min())
+
+            # حساب نتيجة الإيجابية (عداد 100%)
             score = 0
-            if last_close > df_daily['SMA50'].iloc[-1]: score += 25
+            if last_p > df['SMA50'].iloc[-1]: score += 25
             if rsi_val > 50: score += 25
-            if macd.iloc[-1, 0] > macd.iloc[-1, 1]: score += 25
-            if last_close > df_daily['SMA200'].iloc[-1]: score += 25
+            if macd_val > sig_val: score += 25
+            if last_p > df['SMA200'].iloc[-1]: score += 25
 
-            # --- أ: رأس التقرير ---
-            st.markdown(f'<div class="report-title">تقرير تحليل سهم: {symbol}</div>', unsafe_allow_html=True)
-            st.write(f"### تاريخ التحليل: {df_daily.index[-1].strftime('%Y-%m-%d')}")
+            # --- العرض المرئي ---
+            st.markdown(f'<div class="main-header"><p class="symbol-label">{symbol}</p></div>', unsafe_allow_html=True)
 
-            # --- ب: عداد الإيجابية (كما في صورك) ---
-            col1, col2 = st.columns([1, 2])
-            
-            with col1:
-                st.markdown('<div class="status-box">', unsafe_allow_html=True)
+            col_gauge, col_info = st.columns([1, 2])
+
+            with col_gauge:
+                st.markdown('<div class="gauge-card">', unsafe_allow_html=True)
                 fig_gauge = go.Figure(go.Indicator(
-                    mode = "gauge+number",
-                    value = score,
-                    title = {'text': "إيجابية السهم"},
-                    gauge = {
-                        'axis': {'range': [0, 100]},
-                        'bar': {'color': "black"},
-                        'steps': [
-                            {'range': [0, 20], 'color': "red"},
-                            {'range': [20, 40], 'color': "orange"},
-                            {'range': [40, 60], 'color': "yellow"},
-                            {'range': [60, 80], 'color': "lightgreen"},
-                            {'range': [80, 100], 'color': "green"}],
-                        'threshold': {'line': {'color': "white", 'width': 4}, 'thickness': 0.75, 'value': score}
-                    }
+                    mode="gauge+number", value=score,
+                    gauge={'axis': {'range': [0, 100]},
+                           'steps': [
+                               {'range': [0, 30], 'color': "red"},
+                               {'range': [30, 70], 'color': "yellow"},
+                               {'range': [70, 100], 'color': "green"}],
+                           'bar': {'color': "white"}},
+                    title={'text': "مقياس الإيجابية الفني", 'font': {'size': 24, 'color': 'white'}}
                 ))
-                fig_gauge.update_layout(height=300, margin=dict(t=0, b=0, l=10, r=10), paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
+                fig_gauge.update_layout(height=350, paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
                 st.plotly_chart(fig_gauge, use_container_width=True)
-                
-                status_text = "شراء قوي" if score >= 75 else "إيجابي" if score >= 50 else "متعادل" if score >= 30 else "سلبي"
-                st.markdown(f"## الحالة: {status_text}")
                 st.markdown('</div>', unsafe_allow_html=True)
 
-            with col2:
-                # ملخص فني سريع
-                st.write("### 📋 ملخص المؤشرات الفنية")
-                c_a, c_b = st.columns(2)
-                c_a.metric("السعر الحالي", f"{last_p:.2f}")
-                c_b.metric("مؤشر RSI", f"{rsi_val:.2f}")
+            with col_info:
+                st.write("### 📜 بطاقة تقرير السهم")
+                c1, c2, c3 = st.columns(3)
+                c1.metric("السعر الحالي", f"{last_p:.2f}")
+                c2.metric("مؤشر RSI", f"{rsi_val:.1f}")
+                c3.metric("الهدف (⭐)", f"{last_p * 1.05:.2f}")
                 
-                st.info(f"""
-                * **الدعم القريب:** {df_daily['Low'].tail(10).min():.2f}
-                * **المقاومة القريبة:** {df_daily['High'].tail(10).max():.2f}
-                * **المسار:** {"صاعد" if last_close > df_daily['SMA50'].iloc[-1] else "هابط / عرضي"}
-                """)
+                st.success(f"📌 **تحليل المسار:** السهم في منطقة {'إيجابية قوية' if score >= 75 else 'تجميع/انتظار'}")
+                st.info(f"🚩 **المقاومة القادمة:** {res_p:.2f} | 🛡️ **الدعم الفني:** {sup_p:.2f}")
 
-            # --- ج: التشارت الفني الكبير (يومي) ---
-            st.write("### 📊 الرسم البياني اليومي (مؤشرات الحركة)")
-            fig_main = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.7, 0.3])
+            # --- التشارت العملاق (التفاصيل الكاملة) ---
+            st.write("---")
+            st.write("### 📊 التشارت الفني (فريم 4 ساعات)")
             
-            # الشموع والمتوسطات
-            fig_main.add_trace(go.Candlestick(x=df_daily.index, open=df_daily['Open'], high=df_daily['High'], low=df_daily['Low'], close=df_daily['Close'], name="السعر"), row=1, col=1)
-            fig_main.add_trace(go.Scatter(x=df_daily.index, y=df_daily['SMA50'], line=dict(color='orange'), name="متوسط 50"), row=1, col=1)
-            fig_main.add_trace(go.Scatter(x=df_daily.index, y=df_daily['SMA200'], line=dict(color='red'), name="متوسط 200"), row=1, col=1)
-            
-            # الماكد
-            fig_main.add_trace(go.Bar(x=df_daily.index, y=macd.iloc[:, -1], name="MACD Hist"), row=2, col=1)
-            
-            fig_main.update_layout(height=600, template="plotly_dark", xaxis_rangeslider_visible=False)
-            st.plotly_chart(fig_main, use_container_width=True)
+            fig = make_subplots(rows=3, cols=1, shared_xaxes=True, 
+                               vertical_spacing=0.03, row_heights=[0.6, 0.2, 0.2])
 
-            # --- د: الأهداف المستهدفة (النجمة) ---
-            target_p = last_close * 1.05 # هدف افتراضي 5%
-            st.success(f"⭐ الهدف المتوقع القادم: {target_p:.2f}")
+            # 1. السعر والمتوسطات
+            fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], 
+                          low=df['Low'], close=df['Close'], name="الشموع"), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=df['SMA50'], line=dict(color='orange', width=2), name="SMA 50"), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=df['SMA200'], line=dict(color='red', width=2), name="SMA 200"), row=1, col=1)
+            
+            # خطوط المقاومة والدعم
+            fig.add_hline(y=res_p, line_dash="dash", line_color="#FF3131", row=1, col=1)
+            fig.add_hline(y=sup_p, line_dash="dash", line_color="#39FF14", row=1, col=1)
+
+            # 2. RSI
+            fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], line=dict(color='#9b59b6'), name="RSI"), row=2, col=1)
+            fig.add_hline(y=70, line_dash="dot", line_color="red", row=2, col=1)
+            fig.add_hline(y=30, line_dash="dot", line_color="green", row=2, col=1)
+
+            # 3. MACD
+            fig.add_trace(go.Bar(x=df.index, y=df.iloc[:, -1], name="الزخم", marker_color='white'), row=3, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=df.iloc[:, -3], line=dict(color='#00FFCC'), name="MACD"), row=3, col=1)
+
+            fig.update_layout(height=1000, template="plotly_dark", xaxis_rangeslider_visible=False, margin=dict(l=10,r=10,t=10,b=10))
+            st.plotly_chart(fig, use_container_width=True)
 
     except Exception as e:
-        st.error(f"لم يتم العثور على بيانات للسهم. تأكد من الرقم. الخطأ: {e}")
+        st.error(f"⚠️ تنبيه: يرجى التحقق من الرمز المدخل. (Error: {str(e)})")
