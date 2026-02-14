@@ -6,114 +6,92 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import timedelta
 
-# 1. إعدادات الصفحة (ثيم داكن وتنسيق عربي)
-st.set_page_config(page_title="منصة التحليل الفني الاحترافية", layout="wide")
+# إعدادات الصفحة
+st.set_page_config(page_title="المحلل الفني الاحترافي", layout="wide")
 
-# إضافة CSS لتحسين الخطوط والمظهر
+# تنسيق CSS لحل مشكلة التداخل وترتيب الخطوط
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap');
-    html, body, [class*="css"]  {
-        font-family: 'Cairo', sans-serif;
-        text-align: right;
-        direction: rtl;
-    }
-    .main-title { font-size: 55px !important; color: #00FFCC; text-align: center; font-weight: bold; }
-    .stMetric { background-color: #1e2130; border: 1px solid #00FFCC; border-radius: 10px; padding: 15px; }
+    * { font-family: 'Cairo', sans-serif; }
+    .main-header { font-size: 35px !important; color: #00FFCC; text-align: center; padding: 10px; border-bottom: 2px solid #333; margin-bottom: 20px; }
+    .report-card { background-color: #1e2130; border-radius: 15px; padding: 20px; border: 1px solid #444; margin-top: 20px; }
     </style>
     """, unsafe_allow_html=True)
 
-# 2. القائمة الجانبية للتحكم
+# القائمة الجانبية (Sidebar)
 with st.sidebar:
-    st.header("⚙️ لوحة التحكم")
-    show_rsi = st.checkbox("إظهار مؤشر القوة النسبية (RSI)", value=True)
-    show_macd = st.checkbox("إظهار مؤشر الماكد (MACD)", value=True)
-    show_levels = st.checkbox("إظهار الدعم والمقاومة", value=True)
+    st.title("🛠 التحكم")
+    show_levels = st.checkbox("الدعم والمقاومة", value=True)
+    show_rsi = st.checkbox("مؤشر RSI", value=True)
+    show_macd = st.checkbox("مؤشر MACD", value=True)
     st.write("---")
-    st.info("💡 لحفظ التقرير: اضغط (Ctrl + P) واختر 'Save as PDF'")
+    st.write("💡 لحفظ التقرير عربي وبكامل التشارتات: استخدم خيار 'طباعة' من المتصفح وحفظ كـ PDF.")
 
-# 3. البحث
-query = st.text_input("🔍 أدخل الرمز (مثال: 1120 للراجحي، AAPL لآبل، GOLD للذهب):", value="1120").strip()
+# البحث
+query = st.text_input("🔍 أدخل الرمز (مثال: 1120 أو AAPL):", value="1120").strip()
 
-if query.lower() == 'gold': symbol = "GC=F"
-elif query.isdigit(): symbol = query + ".SR"
-else: symbol = query.upper()
+if query:
+    if query.lower() == 'gold': symbol = "GC=F"
+    elif query.isdigit(): symbol = query + ".SR"
+    else: symbol = query.upper()
 
-if symbol:
     try:
-        # جلب بيانات فريم 4 ساعات (نستخدم ساعة ونعيد تشكيلها لآخر أسبوعين)
+        # جلب البيانات
         df = yf.download(symbol, period="1mo", interval="1h")
-        
         if not df.empty:
             if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
             df = df.tail(24 * 14) # آخر أسبوعين
 
-            # حساب المؤشرات
+            # العنوان
+            st.markdown(f'<p class="main-header">تحليل السهم: {symbol}</p>', unsafe_allow_html=True)
+
+            # الحسابات الفنية
             df['RSI'] = ta.rsi(df['Close'], length=14)
-            macd_df = ta.macd(df['Close'])
-            df = pd.concat([df, macd_df], axis=1)
+            macd = ta.macd(df['Close'])
+            res = float(df['High'].max())
+            sup = float(df['Low'].min())
+            last_p = float(df['Close'].iloc[-1])
             
-            last_price = float(df['Close'].iloc[-1])
-            res_level = float(df['High'].max())
-            sup_level = float(df['Low'].min())
-            
-            # حساب الهدف المستقبلي (نجمه)
-            target_price = last_price + (df['Close'].diff().tail(10).mean() * 8)
-            target_date = df.index[-1] + timedelta(days=2)
+            # الهدف والنجمة
+            target_p = last_p + (df['Close'].diff().tail(10).mean() * 5)
+            target_d = df.index[-1] + timedelta(days=2)
 
-            # --- عرض اسم السهم بالخط العريض ---
-            st.markdown(f'<p class="main-title">تحليل سهم: {symbol}</p>', unsafe_allow_html=True)
-
-            # --- التشارت الأساسي (مثل TradingView) ---
+            # التشارت الرئيسي
             rows = 1 + (1 if show_rsi else 0) + (1 if show_macd else 0)
-            fig = make_subplots(rows=rows, cols=1, shared_xaxes=True, vertical_spacing=0.02)
-
-            # الشموع
-            fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], 
-                          low=df['Low'], close=df['Close'], name="السعر"), row=1, col=1)
+            fig = make_subplots(rows=rows, cols=1, shared_xaxes=True, vertical_spacing=0.05)
+            
+            fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="السعر"), row=1, col=1)
             
             if show_levels:
-                fig.add_hline(y=res_level, line_dash="dash", line_color="red", annotation_text="مقاومة", row=1, col=1)
-                fig.add_hline(y=sup_level, line_dash="dash", line_color="green", annotation_text="دعم", row=1, col=1)
+                fig.add_hline(y=res, line_dash="dash", line_color="red", annotation_text="مقاومة", row=1, col=1)
+                fig.add_hline(y=sup, line_dash="dash", line_color="green", annotation_text="دعم", row=1, col=1)
 
-            curr_row = 2
+            curr = 2
             if show_rsi:
-                fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], name="RSI", line=dict(color='#9b59b6')), row=curr_row, col=1)
-                curr_row += 1
-            
+                fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], name="RSI", line=dict(color='purple')), row=curr, col=1)
+                curr += 1
             if show_macd:
-                fig.add_trace(go.Bar(x=df.index, y=df.iloc[:, -1], name="MACD"), row=curr_row, col=1)
+                fig.add_trace(go.Bar(x=df.index, y=macd.iloc[:, -1], name="MACD"), row=curr, col=1)
 
-            fig.update_layout(height=600, template="plotly_dark", xaxis_rangeslider_visible=False)
+            fig.update_layout(height=600, template="plotly_dark", xaxis_rangeslider_visible=False, margin=dict(l=0,r=0,t=0,b=0))
             st.plotly_chart(fig, use_container_width=True)
 
-            # --- قسم التوقعات والنجمة (تحت التشارت) ---
-            st.write("---")
-            st.header("🔮 توقعات اليومين القادمين")
+            # منطقة التوقعات (مرتبة)
+            st.markdown("<div class='report-card'>", unsafe_allow_html=True)
+            st.subheader("🎯 أهداف اليومين القادمين")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("السعر الحالي", f"{last_p:.2f}")
+            c2.metric("الهدف (⭐)", f"{target_p:.2f}")
+            c3.metric("التاريخ", target_d.strftime('%Y-%m-%d'))
             
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("السعر الحالي", f"{last_price:.2f}")
-            with col2:
-                st.metric("الهدف المتوقع (⭐)", f"{target_price:.2f}")
-            with col3:
-                st.metric("التاريخ المتوقع", target_date.strftime('%Y-%m-%d'))
-
-            # تشارت الهدف الصغير
-            fig_target = go.Figure()
-            fig_target.add_trace(go.Scatter(x=df.index[-15:], y=df['Close'][-15:], name="المسار", line=dict(color='white')))
-            fig_target.add_trace(go.Scatter(x=[target_date], y=[target_price], mode='markers+text',
-                                          text=["⭐ الهدف"], textposition="top center",
-                                          marker=dict(color='#00FFCC', size=25, symbol='star')))
-            fig_target.update_layout(height=350, template="plotly_dark", title="مسار الهدف السعري")
-            st.plotly_chart(fig_target, use_container_width=True)
-
-            # --- الخلاصة العربية للتقرير ---
-            st.subheader("📝 ملخص التقرير الفني")
-            trend_status = "صاعد" if target_price > last_price else "هابط"
-            st.write(f"بناءً على تحليل فريم الـ 4 ساعات لآخر أسبوعين، يظهر السهم في مسار **{trend_status}**. "
-                     f"مستويات الدعم الرئيسية عند {sup_level:.2f} والمقاومة عند {res_level:.2f}. "
-                     f"يتوقع وصول السعر إلى المنطقة المستهدفة {target_price:.2f} خلال الـ 48 ساعة القادمة.")
+            # تشارت النجمة
+            fig_star = go.Figure()
+            fig_star.add_trace(go.Scatter(x=df.index[-20:], y=df['Close'][-20:], mode='lines+markers', name="المسار"))
+            fig_star.add_trace(go.Scatter(x=[target_d], y=[target_p], mode='markers+text', text=["⭐ الهدف"], textposition="top center", marker=dict(size=20, color="#00FFCC", symbol="star")))
+            fig_star.update_layout(height=300, template="plotly_dark", title="مسار النجمة المتوقع")
+            st.plotly_chart(fig_star, use_container_width=True)
+            st.markdown("</div>", unsafe_allow_html=True)
 
     except Exception as e:
-        st.error(f"حدث خطأ في جلب البيانات: {e}")
+        st.error(f"تأكد من الرمز، حدث خطأ: {e}")
